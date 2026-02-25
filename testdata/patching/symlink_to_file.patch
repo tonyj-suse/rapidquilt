@@ -1,0 +1,6 @@
+--- symlink_to_file.in
++++ symlink_to_file.out
+@@ -1 +1,2 @@
+-target
++This is now a
++regular file.

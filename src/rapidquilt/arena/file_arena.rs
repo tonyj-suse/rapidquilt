@@ -47,6 +47,36 @@ impl<'a> Arena for FileArena<'a> {
         Ok(slice)
     }
 
+    fn load_symlink_target(&self, path: &Path) -> Result<&[u8], io::Error> {
+        let target = fs::read_link(path)?;
+
+        #[cfg(unix)]
+        let data = {
+            use std::os::unix::ffi::OsStrExt;
+            target.as_os_str().as_bytes().to_vec()
+        };
+
+        #[cfg(not(unix))]
+        let data = {
+            target.to_str().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Non-UTF8 symlink target"))?.as_bytes().to_vec()
+        };
+
+        let mut data = data.into_boxed_slice();
+
+        // Add a newline to the symlink target so it's a proper line.
+        let mut data_vec = data.into_vec();
+        data_vec.push(b'\n');
+        data = data_vec.into_boxed_slice();
+
+        let slice = unsafe {
+            transmute::<&[u8], &'a [u8]>(&data)
+        };
+
+        self.files.lock().unwrap().push(data);
+
+        Ok(slice)
+    }
+
     /// Get statistics
     fn stats(&self) -> Stats {
         let files = self.files.lock().unwrap(); // NOTE(unwrap): If the lock is poisoned, some other thread panicked. We may as well.

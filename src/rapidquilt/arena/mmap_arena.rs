@@ -27,6 +27,7 @@ struct Mapping {
 /// the file truncated.
 pub struct MmapArena<'a> {
     mappings: Mutex<Vec<Mapping>>,
+    extra_files: Mutex<Vec<Box<[u8]>>>,
     _phantom: PhantomData<&'a [u8]>,
 }
 
@@ -38,6 +39,7 @@ impl MmapArena<'_> {
     pub fn new() -> Self {
         Self {
             mappings: Mutex::new(Vec::new()),
+            extra_files: Mutex::new(Vec::new()),
             _phantom: PhantomData,
         }
     }
@@ -81,13 +83,38 @@ impl<'a> Arena for MmapArena<'a> {
         Ok(slice)
     }
 
+    fn load_symlink_target(&self, path: &Path) -> Result<&[u8], io::Error> {
+        use std::fs;
+        use std::mem::transmute;
+
+        let target = fs::read_link(path)?;
+        let data = {
+            use std::os::unix::ffi::OsStrExt;
+            target.as_os_str().as_bytes().to_vec()
+        };
+
+        // Add a newline to the symlink target so it's a proper line.
+        let mut data_vec = data;
+        data_vec.push(b'\n');
+        let data = data_vec.into_boxed_slice();
+
+        let slice = unsafe {
+            transmute::<&[u8], &'a [u8]>(&data)
+        };
+
+        self.extra_files.lock().unwrap().push(data);
+
+        Ok(slice)
+    }
+
     /// Get statistics
     fn stats(&self) -> Stats {
         let mappings = self.mappings.lock().unwrap(); // NOTE(unwrap): If the lock is poisoned, some other thread panicked. We may as well.
+        let extra_files = self.extra_files.lock().unwrap();
 
         Stats {
-            loaded_files: mappings.len(),
-            total_size: mappings.iter().map(|m| m.size).sum(),
+            loaded_files: mappings.len() + extra_files.len(),
+            total_size: mappings.iter().map(|m| m.size).sum::<usize>() + extra_files.iter().map(|f| f.len()).sum::<usize>(),
         }
     }
 }

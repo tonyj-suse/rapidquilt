@@ -1,0 +1,5 @@
+--- symlink_modify.in
++++ symlink_modify.out
+@@ -1 +1 @@
+-old_target
++new_target

@@ -13,10 +13,16 @@ fn copy_tree(from: &Path, to: &Path) -> Result<()> {
         let entry = entry?;
         let src_path = entry.path();
         let dest_path = to.join(entry.file_name());
-        if src_path.is_file() {
+        let metadata = fs::symlink_metadata(&src_path)?;
+
+        if metadata.file_type().is_symlink() {
+            let target = fs::read_link(&src_path)?;
+            std::os::unix::fs::symlink(target, &dest_path)
+                .context(format!("Creating symlink {:?} under {:?}", dest_path, to))?;
+        } else if metadata.is_file() {
             fs::copy(&src_path, &dest_path)
                 .context(format!("Copying {:?} under {:?}", src_path, to))?;
-        } else if src_path.is_dir() {
+        } else if metadata.is_dir() {
             fs::create_dir(&dest_path)
                 .context(format!("Creating directory {:?}", dest_path))?;
             copy_tree(&src_path, &dest_path)?;
@@ -31,14 +37,12 @@ fn compare_tree(src: &Path, dst: &Path) -> Result<()> {
         let entry = entry?;
         let src_path = entry.path();
         let dest_path = dst.join(entry.file_name());
-        let mut src_file = std::fs::File::open(&src_path)
-            .context(format!("Opening {:?}", src_path))?;
-        let mut dest_file = std::fs::File::open(&dest_path)
-            .context(format!("Opening {:?}", dest_path))?;
-        let src_meta = src_file.metadata()
+
+        let src_meta = fs::symlink_metadata(&src_path)
             .context(format!("Querying {:?} metadata", src_path))?;
-        let dest_meta = dest_file.metadata()
+        let dest_meta = fs::symlink_metadata(&dest_path)
             .context(format!("Querying {:?} metadata", dest_path))?;
+
         if src_meta.permissions() != dest_meta.permissions() {
             eprintln!("Mismatch in {:?}", entry.file_name());
             eprintln!("  expected: {:?}", src_meta.permissions());
@@ -46,7 +50,22 @@ fn compare_tree(src: &Path, dst: &Path) -> Result<()> {
 
             panic!("Permission mismatch at {}", src.display());
         }
-        if src_meta.is_file() {
+
+        if src_meta.file_type().is_symlink() {
+            if !dest_meta.file_type().is_symlink() {
+                panic!("Expected symlink at {}, but found regular file", dest_path.display());
+            }
+            let src_target = fs::read_link(&src_path)?;
+            let dest_target = fs::read_link(&dest_path)?;
+            if src_target != dest_target {
+                panic!("Symlink target mismatch at {}: expected {:?}, actual {:?}", dest_path.display(), src_target, dest_target);
+            }
+        } else if src_meta.is_file() {
+            let mut src_file = std::fs::File::open(&src_path)
+                .context(format!("Opening {:?}", src_path))?;
+            let mut dest_file = std::fs::File::open(&dest_path)
+                .context(format!("Opening {:?}", dest_path))?;
+
             let mut expected = Vec::new();
             src_file.read_to_end(&mut expected)
                 .context(format!("Reading {:?}", src_path))?;
@@ -77,7 +96,8 @@ fn check_extra_files(src: &Path, dst: &Path) -> Result<()> {
         let entry = entry?;
         let dst_path = entry.path();
         let src_path = src.join(entry.file_name());
-        if !src_path.exists() {
+
+        if src_path.symlink_metadata().is_err() {
             errors.push(format!("Unexpected file {:?}", dst_path));
         } else if dst_path.is_dir() {
             check_extra_files(&src_path, &dst_path)?;

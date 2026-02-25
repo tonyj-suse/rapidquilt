@@ -1,0 +1,4 @@
+--- symlink_delete.in
++++ /dev/null
+@@ -1 +0,0 @@
+-target

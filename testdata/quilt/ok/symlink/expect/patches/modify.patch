@@ -1,0 +1,6 @@
+diff --git a/link b/link
+--- a/link
++++ b/link
+@@ -1 +1 @@
+-target
++new_target

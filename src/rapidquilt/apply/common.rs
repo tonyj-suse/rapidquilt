@@ -166,6 +166,20 @@ pub fn save_modified_file<'arena, H: BuildHasher>(
                 fs::create_dir_all(parent)?;
             }
         }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Some(ref permissions) = file.permissions {
+                if permissions.mode() & 0o170000 == 0o120000 {
+                    let mut target = Vec::new();
+                    file.write_to(&mut target)?;
+                    let target_str = std::str::from_utf8(&target).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?.trim_end_matches(|c| c == '\n' || c == '\r');
+                    return std::os::unix::fs::symlink(target_str, file_path);
+                }
+            }
+        }
+
         let mut output = File::create(file_path)?;
 
         // If any patch set non-default permission, set them now
@@ -235,10 +249,14 @@ impl<'arena, 'config> ModifiedFiles<'arena, 'config> {
 
             Entry::Vacant(entry) => {
                 let real_path = config.base_dir.join(filename);
-                match arena.load_file(&real_path) {
-                    Ok(data) => {
-                        let meta = std::fs::metadata(real_path)?;
-                        entry.insert(ModifiedFile::new(data, true, Some(meta.permissions())))
+                match fs::symlink_metadata(&real_path) {
+                    Ok(metadata) => {
+                        let data = if metadata.file_type().is_symlink() {
+                            arena.load_symlink_target(&real_path)?
+                        } else {
+                            arena.load_file(&real_path)?
+                        };
+                        entry.insert(ModifiedFile::new(data, true, Some(metadata.permissions())))
                     }
 
                     // If the file doesn't exist, make empty one.
@@ -317,12 +335,27 @@ pub fn save_backup_file(config: &ApplyConfig,
         println!("Saving backup file {:?}", path);
     }
 
-     let real_path = config.base_dir.join(&path);
+    let real_path = config.base_dir.join(&path);
     // NOTE(unwrap): We know that there is a parent; we built it ourselves.
     let path_parent = real_path.parent().unwrap();
-    fs::create_dir_all(path_parent)
-        .and_then(|_| create_file(&real_path, &original_file.permissions))
-        .and_then(|mut f| original_file.write_to(&mut f))
+    fs::create_dir_all(path_parent)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Some(ref permissions) = original_file.permissions {
+            if permissions.mode() & 0o170000 == 0o120000 {
+                let mut target = Vec::new();
+                original_file.write_to(&mut target)?;
+                let target_str = std::str::from_utf8(&target).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?.trim_end_matches(|c| c == '\n' || c == '\r');
+                return std::os::unix::fs::symlink(target_str, &real_path)
+                    .with_context(|| ApplyError::SaveQuiltBackupFile { filename: path });
+            }
+        }
+    }
+
+    let mut f = create_file(&real_path, &original_file.permissions)?;
+    original_file.write_to(&mut f)
         .with_context(|| ApplyError::SaveQuiltBackupFile { filename: path })?;
 
     Ok(())
