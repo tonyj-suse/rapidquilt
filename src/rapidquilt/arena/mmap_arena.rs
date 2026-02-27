@@ -75,6 +75,27 @@ impl<'a> Arena for MmapArena<'a> {
         Ok(slice)
     }
 
+    fn load_symlink_target(&self, path: &Path) -> Result<&[u8], io::Error> {
+        use std::fs;
+        use std::mem::transmute;
+
+        let target = fs::read_link(path)?;
+        let data = {
+            use std::os::unix::ffi::OsStrExt;
+            target.as_os_str().as_bytes().to_vec()
+        };
+
+        let data = data.into_boxed_slice();
+
+        let slice = unsafe {
+            transmute::<&[u8], &'a [u8]>(&data)
+        };
+
+        self.resources.lock().unwrap().push(Resource::Data(data));
+
+        Ok(slice)
+    }
+
     /// Get statistics
     fn stats(&self) -> Stats {
         let resources = self.resources.lock().unwrap(); // NOTE(unwrap): If the lock is poisoned, some other thread panicked. We may as well.

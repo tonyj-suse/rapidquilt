@@ -18,6 +18,11 @@ pub trait Arena: Sync {
     /// is valid as long as this object is alive. (Same lifetimes.)
     fn load_file(&self, path: &Path) -> Result<&[u8], io::Error>;
 
+    /// Load the symlink target and return byte slice of its content. 
+    /// The slice is valid as long as this object is alive.
+    #[allow(dead_code)]
+    fn load_symlink_target(&self, path: &Path) -> Result<&[u8], io::Error>;
+
     /// Get statistics
     fn stats(&self) -> Stats;
 }
