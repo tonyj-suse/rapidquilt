@@ -1,0 +1,7 @@
+--- symlink_to_file.in
++++ symlink_to_file.out
+@@ -1 +1,2 @@
+-target
+\ No newline at end of file
++This is now a
++regular file.

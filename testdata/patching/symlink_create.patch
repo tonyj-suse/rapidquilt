@@ -1,0 +1,5 @@
+--- /dev/null
++++ symlink_create.out
+@@ -0,0 +1 @@
++target
+\ No newline at end of file

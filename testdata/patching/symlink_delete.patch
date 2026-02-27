@@ -1,0 +1,5 @@
+--- symlink_delete.in
++++ /dev/null
+@@ -1 +0,0 @@
+-target
+\ No newline at end of file
