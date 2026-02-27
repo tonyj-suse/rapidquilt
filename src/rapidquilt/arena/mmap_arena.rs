@@ -9,14 +9,8 @@ use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::sync::Mutex;
 
-use super::{Arena, Stats};
+use super::{Arena, Stats, Resource, Mapping};
 
-
-
-struct Mapping {
-    start: *mut libc::c_void,
-    size: usize,
-}
 
 /// Utility that reads files and keeps them loaded in immovable place in memory
 /// for its lifetime. So the returned byte slices can be used as long as the
@@ -26,7 +20,7 @@ struct Mapping {
 /// changes the file, the content of the memory may change or cause crash if
 /// the file truncated.
 pub struct MmapArena<'a> {
-    mappings: Mutex<Vec<Mapping>>,
+    resources: Mutex<Vec<Resource>>,
     _phantom: PhantomData<&'a [u8]>,
 }
 
@@ -37,7 +31,7 @@ unsafe impl Sync for MmapArena<'_> {}
 impl MmapArena<'_> {
     pub fn new() -> Self {
         Self {
-            mappings: Mutex::new(Vec::new()),
+            resources: Mutex::new(Vec::new()),
             _phantom: PhantomData,
         }
     }
@@ -72,32 +66,42 @@ impl<'a> Arena for MmapArena<'a> {
             size,
         };
 
-        self.mappings.lock().unwrap().push(mapping); // NOTE(unwrap): If the lock is poisoned, some other thread panicked. We may as well.
-
         let slice = unsafe {
             std::slice::from_raw_parts::<'a>(start as *const u8, size)
         };
+
+        self.resources.lock().unwrap().push(Resource::Mapping(mapping)); // NOTE(unwrap): If the lock is poisoned, some other thread panicked. We may as well.
 
         Ok(slice)
     }
 
     /// Get statistics
     fn stats(&self) -> Stats {
-        let mappings = self.mappings.lock().unwrap(); // NOTE(unwrap): If the lock is poisoned, some other thread panicked. We may as well.
+        let resources = self.resources.lock().unwrap(); // NOTE(unwrap): If the lock is poisoned, some other thread panicked. We may as well.
+
+        let mut total_size = 0;
+        for r in resources.iter() {
+            total_size += match r {
+                Resource::Mapping(m) => m.size,
+                Resource::Data(d) => d.len(),
+            };
+        }
 
         Stats {
-            loaded_files: mappings.len(),
-            total_size: mappings.iter().map(|m| m.size).sum(),
+            loaded_files: resources.len(),
+            total_size,
         }
     }
 }
 
 impl Drop for MmapArena<'_> {
     fn drop(&mut self) {
-        if let Ok(mappings) = self.mappings.lock() {
-            for mapping in mappings.iter() {
-                unsafe {
-                    libc::munmap(mapping.start, mapping.size);
+        if let Ok(resources) = self.resources.lock() {
+            for r in resources.iter() {
+                if let Resource::Mapping(m) = r {
+                    unsafe {
+                        libc::munmap(m.start, m.size);
+                    }
                 }
             }
         }

@@ -22,6 +22,19 @@ pub trait Arena: Sync {
     fn stats(&self) -> Stats;
 }
 
+#[cfg(unix)]
+pub(crate) struct Mapping {
+    pub(crate) start: *mut libc::c_void,
+    pub(crate) size: usize,
+}
+
+#[cfg(unix)]
+pub(crate) enum Resource {
+    Mapping(Mapping),
+    #[allow(dead_code)]
+    Data(Box<[u8]>),
+}
+
 pub struct Stats {
     loaded_files: usize,
     total_size: usize,
