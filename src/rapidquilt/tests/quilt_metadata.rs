@@ -31,22 +31,33 @@ fn compare_tree(src: &Path, dst: &Path) -> Result<()> {
         let entry = entry?;
         let src_path = entry.path();
         let dest_path = dst.join(entry.file_name());
-        let mut src_file = std::fs::File::open(&src_path)
-            .context(format!("Opening {:?}", src_path))?;
-        let mut dest_file = std::fs::File::open(&dest_path)
-            .context(format!("Opening {:?}", dest_path))?;
-        let src_meta = src_file.metadata()
-            .context(format!("Querying {:?} metadata", src_path))?;
-        let dest_meta = dest_file.metadata()
-            .context(format!("Querying {:?} metadata", dest_path))?;
-        if src_meta.permissions() != dest_meta.permissions() {
-            eprintln!("Mismatch in {:?}", entry.file_name());
-            eprintln!("  expected: {:?}", src_meta.permissions());
-            eprintln!("  actual: {:?}", dest_meta.permissions());
 
-            panic!("Permission mismatch at {}", src.display());
+        let src_meta = fs::symlink_metadata(&src_path)
+            .context(format!("Querying {:?} metadata", src_path))?;
+        let dest_meta = fs::symlink_metadata(&dest_path)
+            .context(format!("Querying {:?} metadata", dest_path))?;
+
+        if src_meta.permissions() != dest_meta.permissions() {
+            return Err(anyhow!("Permission mismatch at {:?}: expected {:?}, actual {:?}",
+                               dest_path, src_meta.permissions(), dest_meta.permissions()));
         }
-        if src_meta.is_file() {
+
+        if src_meta.file_type().is_symlink() {
+            if !dest_meta.file_type().is_symlink() {
+                return Err(anyhow!("Expected symlink at {:?}, but found regular file", dest_path));
+            }
+            let src_target = fs::read_link(&src_path)?;
+            let dest_target = fs::read_link(&dest_path)?;
+            if src_target != dest_target {
+                return Err(anyhow!("Symlink target mismatch at {:?}: expected {:?}, actual {:?}",
+                                   dest_path, src_target, dest_target));
+            }
+        } else if src_meta.is_file() {
+            let mut src_file = std::fs::File::open(&src_path)
+                .context(format!("Opening {:?}", src_path))?;
+            let mut dest_file = std::fs::File::open(&dest_path)
+                .context(format!("Opening {:?}", dest_path))?;
+
             let mut expected = Vec::new();
             src_file.read_to_end(&mut expected)
                 .context(format!("Reading {:?}", src_path))?;
@@ -54,14 +65,10 @@ fn compare_tree(src: &Path, dst: &Path) -> Result<()> {
             dest_file.read_to_end(&mut actual)
                 .context(format!("Reading {:?}", dest_path))?;
             if actual != expected {
-                eprintln!("Mismatch in {:?}", entry.file_name());
-                eprintln!("<<< EXPECTED\n{}",
-                          String::from_utf8_lossy(&expected));
-                eprintln!("=== ACTUAL\n{}",
-                          String::from_utf8_lossy(&actual));
-                eprintln!(">>>");
-
-                panic!("Content mismatch at {}", src.display());
+                return Err(anyhow!("Content mismatch in {:?}:\n<<< EXPECTED\n{}=== ACTUAL\n{}\n>>>",
+                                   dest_path,
+                                   String::from_utf8_lossy(&expected),
+                                   String::from_utf8_lossy(&actual)));
             }
         } else if src_meta.is_dir() {
             compare_tree(&src_path, &dest_path)?;
