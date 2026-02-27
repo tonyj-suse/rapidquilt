@@ -1,0 +1,8 @@
+diff --git a/link b/link
+--- a/link
++++ b/link
+@@ -1 +1 @@
+-target
+\ No newline at end of file
++new_target
+\ No newline at end of file

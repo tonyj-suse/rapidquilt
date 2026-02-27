@@ -1,0 +1,10 @@
+diff --git a/link b/link
+old mode 120000
+new mode 100644
+--- a/link
++++ b/link
+@@ -1 +1,2 @@
+-target
+\ No newline at end of file
++This is now a
++regular file.

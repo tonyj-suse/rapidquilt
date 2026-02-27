@@ -20,7 +20,6 @@ pub trait Arena: Sync {
 
     /// Load the symlink target and return byte slice of its content. 
     /// The slice is valid as long as this object is alive.
-    #[allow(dead_code)]
     fn load_symlink_target(&self, path: &Path) -> Result<&[u8], io::Error>;
 
     /// Get statistics
@@ -36,7 +35,6 @@ pub(crate) struct Mapping {
 #[cfg(unix)]
 pub(crate) enum Resource {
     Mapping(Mapping),
-    #[allow(dead_code)]
     Data(Box<[u8]>),
 }
 
