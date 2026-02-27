@@ -235,10 +235,16 @@ impl<'arena, 'config> ModifiedFiles<'arena, 'config> {
 
             Entry::Vacant(entry) => {
                 let real_path = config.base_dir.join(filename);
-                match arena.load_file(&real_path) {
-                    Ok(data) => {
-                        let meta = std::fs::metadata(real_path)?;
-                        entry.insert(ModifiedFile::new(data, true, Some(meta.permissions())))
+                match fs::symlink_metadata(&real_path) {
+                    Ok(metadata) => {
+                        // Note: We use metadata.file_type().is_symlink() instead of metadata.is_symlink()
+                        // to maintain compatibility with Rust versions older than 1.58.
+                        let data = if metadata.file_type().is_symlink() {
+                            arena.load_symlink_target(&real_path)?
+                        } else {
+                            arena.load_file(&real_path)?
+                        };
+                        entry.insert(ModifiedFile::new(data, true, Some(metadata.permissions())))
                     }
 
                     // If the file doesn't exist, make empty one.
