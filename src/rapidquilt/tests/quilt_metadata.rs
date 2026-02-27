@@ -13,10 +13,16 @@ fn copy_tree(from: &Path, to: &Path) -> Result<()> {
         let entry = entry?;
         let src_path = entry.path();
         let dest_path = to.join(entry.file_name());
-        if src_path.is_file() {
+        let metadata = fs::symlink_metadata(&src_path)?;
+
+        if metadata.file_type().is_symlink() {
+            let target = fs::read_link(&src_path)?;
+            std::os::unix::fs::symlink(target, &dest_path)
+                .context(format!("Creating symlink {:?} under {:?}", dest_path, to))?;
+        } else if metadata.is_file() {
             fs::copy(&src_path, &dest_path)
                 .context(format!("Copying {:?} under {:?}", src_path, to))?;
-        } else if src_path.is_dir() {
+        } else if metadata.is_dir() {
             fs::create_dir(&dest_path)
                 .context(format!("Creating directory {:?}", dest_path))?;
             copy_tree(&src_path, &dest_path)?;
@@ -84,7 +90,8 @@ fn check_extra_files(src: &Path, dst: &Path) -> Result<()> {
         let entry = entry?;
         let dst_path = entry.path();
         let src_path = src.join(entry.file_name());
-        if !src_path.exists() {
+
+        if src_path.symlink_metadata().is_err() {
             errors.push(format!("Unexpected file {:?}", dst_path));
         } else if dst_path.is_dir() {
             check_extra_files(&src_path, &dst_path)?;
