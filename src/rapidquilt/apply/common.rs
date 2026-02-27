@@ -279,8 +279,9 @@ impl<'arena, 'config> ModifiedFiles<'arena, 'config> {
         applied_patch: &PatchStatus<'arena, '_>)
         -> &ModifiedFile<'arena>
     {
-        // NOTE(unwrap): It must be there, we must have loaded it when applying the patch.
-        let file = self.get_mut(&applied_patch.final_filename).unwrap();
+        // SAFETY: The file must be present in `self.inner` because it was loaded/created
+        // during the forward application of this patch.
+        let file = self.get_mut(&applied_patch.final_filename).expect("File must be loaded during application");
 
         applied_patch.file_patch.rollback(file, PatchDirection::Forward, &applied_patch.report);
 
@@ -289,8 +290,9 @@ impl<'arena, 'config> ModifiedFiles<'arena, 'config> {
             // Now we have to rename backwards
             let mut tmp_file = file.move_out();
 
-            // NOTE(unwrap): It must be there, we must have loaded it when applying the patch.
-            let old_file = self.get_mut(&applied_patch.target_filename).unwrap();
+            // SAFETY: The original filename must be present in `self.inner` because it was the 
+            // starting point of the rename operation during forward application.
+            let old_file = self.get_mut(&applied_patch.target_filename).expect("Original file must be loaded during application");
             let ok = old_file.move_in(&mut tmp_file);
             // It must be ok during rollback, otherwise we have bug in the applying code
             assert!(ok);
@@ -298,8 +300,8 @@ impl<'arena, 'config> ModifiedFiles<'arena, 'config> {
             old_file
         } else {
             // TODO: Here we just search for `file` again. It would be nicer to just return `file`, but borrow checker does not like that.
-            // NOTE(unwrap): It must be there, we must have loaded it when applying the patch.
-            self.get(&applied_patch.final_filename).unwrap()
+            // SAFETY: The file must be present in `self.inner` as explained above.
+            self.get(&applied_patch.final_filename).expect("File must be loaded during application")
         }
     }
 }
@@ -338,8 +340,8 @@ pub fn save_backup_file(config: &ApplyConfig,
     }
 
      let real_path = config.base_dir.join(&path);
-    // NOTE(unwrap): We know that there is a parent; we built it ourselves.
-    let path_parent = real_path.parent().unwrap();
+    // SAFETY: We know that there is a parent; we built the path ourselves using `.pc/<patch_filename>/<filename>`.
+    let path_parent = real_path.parent().expect("Backup path must have a parent");
     fs::create_dir_all(path_parent)?;
 
     #[cfg(unix)]
@@ -503,7 +505,8 @@ impl<'arena, 'config> AppliedState<'arena, 'config> {
 
         // If the patch renames the file. do it now...
         let (file, final_filename) = if file_patch.is_rename() {
-            let new_filename = file_patch.new_filename().unwrap(); // NOTE(unwrap): It must be there for renaming patches.
+            // SAFETY: Renaming patches are guaranteed by the parser to have a new_filename.
+            let new_filename = file_patch.new_filename().expect("Renaming patch must have a new filename");
 
             if *new_filename == target_filename {
                 // TODO: Proper reporting!
@@ -650,9 +653,11 @@ impl<'arena, 'config> AppliedState<'arena, 'config> {
 
             if applied_patch.file_patch.is_rename() {
                 // If it was a rename, we also have to backup the new file (it will be empty file).
-                let new_filename = applied_patch.file_patch.new_filename().unwrap();
-                // NOTE(unwrap): It must be there, we must have loaded it when applying the patch.
-                let new_file = self.modified_files.get(new_filename).unwrap();
+                // SAFETY: Renaming patches are guaranteed by the parser to have a new_filename.
+                let new_filename = applied_patch.file_patch.new_filename().expect("Renaming patch must have a new filename");
+                // SAFETY: The file must be present in `self.modified_files` because it was loaded/created
+                // during the forward application of this patch.
+                let new_file = self.modified_files.get(new_filename).expect("File must be loaded during application");
                 save_backup_file(config, applied_patch.patch_filename, new_filename, new_file)?;
             }
         }
