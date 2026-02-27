@@ -162,11 +162,25 @@ pub fn save_modified_file<'arena, H: BuildHasher>(
         if !file.existed {
             // If the file is new, the directory may be new as well. Let's
             // create it now.
-            if let Some(parent) = file_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-        }
-        let mut output = File::create(file_path)?;
+                        if let Some(parent) = file_path.parent() {
+                            fs::create_dir_all(parent)?;
+                        }
+                    }
+            
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        if let Some(ref permissions) = file.permissions {
+                            if permissions.mode() & 0o170000 == 0o120000 {
+                                let mut target = Vec::new();
+                                file.write_to(&mut target)?;
+                                let target_str = std::str::from_utf8(&target).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                                return std::os::unix::fs::symlink(target_str, file_path);
+                            }
+                        }
+                    }
+            
+                    let mut output = File::create(file_path)?;
 
         // If any patch set non-default permission, set them now
         if let Some(ref permissions) = file.permissions {
@@ -326,9 +340,24 @@ pub fn save_backup_file(config: &ApplyConfig,
      let real_path = config.base_dir.join(&path);
     // NOTE(unwrap): We know that there is a parent; we built it ourselves.
     let path_parent = real_path.parent().unwrap();
-    fs::create_dir_all(path_parent)
-        .and_then(|_| create_file(&real_path, &original_file.permissions))
-        .and_then(|mut f| original_file.write_to(&mut f))
+    fs::create_dir_all(path_parent)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Some(ref permissions) = original_file.permissions {
+            if permissions.mode() & 0o170000 == 0o120000 {
+                let mut target = Vec::new();
+                original_file.write_to(&mut target)?;
+                let target_str = std::str::from_utf8(&target).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                return std::os::unix::fs::symlink(target_str, &real_path)
+                    .with_context(|| ApplyError::SaveQuiltBackupFile { filename: path });
+            }
+        }
+    }
+
+    let mut f = create_file(&real_path, &original_file.permissions)?;
+    original_file.write_to(&mut f)
         .with_context(|| ApplyError::SaveQuiltBackupFile { filename: path })?;
 
     Ok(())
